@@ -1,0 +1,542 @@
+{% extends "base.html" %}
+
+{% block title %}Batch Overview | {{ batch.batch_name }}{% endblock %}
+
+{% block content %}
+<!-- Standard Page Header Bar (Back Button Pattern matching design/3-overview.png) -->
+<div class="page-header-bar">
+    <div class="page-header-left">
+        <a href="{{ url_for('select_batch') }}" class="btn-back-arrow" title="Change Batch">
+            ←
+        </a>
+        <div class="page-title-block">
+            <h1>Batch Overview — Class Analytics</h1>
+            <p>Monitor cohort health, track student success scores, and review performance trends.</p>
+        </div>
+    </div>
+
+    <!-- Top-Right Cohort Badge & Batch Switcher -->
+    <div class="cohort-info-pill">
+        <span>📖 {{ batch.department }} • Batch <strong>{{ batch.batch_name }}</strong></span>
+        <a href="{{ url_for('select_batch') }}" title="Switch to another batch">Change Batch</a>
+    </div>
+</div>
+
+<!-- =========================================================================
+     1. THREE STAT CARDS (Total Students, Average Success Score, Attention Count)
+     ========================================================================= -->
+<section class="stat-cards-grid three-cards" aria-label="Key Batch Statistics">
+    <!-- Stat Card 1: Total Students -->
+    <div class="stat-card">
+        <div class="stat-icon-box blue" aria-hidden="true">
+            👥
+        </div>
+        <div class="stat-content">
+            <span class="stat-label">Total Students</span>
+            <span class="stat-value" id="kpi-total-students">{{ kpis.total_students }}</span>
+        </div>
+    </div>
+
+    <!-- Stat Card 2: Average Success Score -->
+    <div class="stat-card">
+        <div class="stat-icon-box green" aria-hidden="true">
+            📈
+        </div>
+        <div class="stat-content">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;">
+                <span class="stat-label">Avg Success Score (Class Average)</span>
+                <!-- "How is the score calculated?" info trigger -->
+                <button type="button" class="score-calc-info-link" onclick="openScoringModal()" title="View indicator weights">
+                    ℹ️ How is this calculated?
+                </button>
+            </div>
+            <span class="stat-value" id="kpi-avg-score">{{ kpis.avg_success_score }}%</span>
+        </div>
+    </div>
+
+    <!-- Stat Card 3: Students Needing Attention -->
+    <div class="stat-card">
+        <div class="stat-icon-box amber" aria-hidden="true">
+            ⚠️
+        </div>
+        <div class="stat-content">
+            <span class="stat-label">Students Needing Attention (Students at Risk)</span>
+            <span class="stat-value" style="color: var(--danger-text);" id="kpi-attention-count">{{ kpis.attention_count }}</span>
+        </div>
+    </div>
+</section>
+
+<!-- =========================================================================
+     2. RECTANGULAR BOX LISTING STUDENTS WHO NEED ATTENTION
+        - UID and score (sorted lowest first)
+        - Scrollable container
+        - Clickable rows navigating to Student Detail
+        - "Download as CSV" button
+     ========================================================================= -->
+<section class="attention-box-card" aria-label="Students Requiring Immediate Attention">
+    <div class="attention-box-header">
+        <div class="attention-header-title-wrap">
+            <h2>
+                <span>⚠️</span>
+                <span>Students Requiring Attention</span>
+            </h2>
+            <p>Students with Success Score &lt; 50, low attendance (&lt; 65%), or multiple active backlogs (sorted lowest score first).</p>
+        </div>
+
+        <div class="attention-header-actions">
+            <!-- Live Search in Box -->
+            <div class="search-input-box">
+                <span class="search-icon-symbol" aria-hidden="true">🔍</span>
+                <input 
+                    type="text" 
+                    id="attention-box-search" 
+                    placeholder="Search UID or name..." 
+                    onkeyup="filterAttentionBox()"
+                    aria-label="Filter attention list"
+                >
+            </div>
+
+            <!-- Download as CSV Button -->
+            <a href="{{ url_for('api_attention_csv', batch_code=batch.batch_code) }}" class="btn-csv-download" id="download-csv-btn" title="Download attention list as CSV">
+                <span>📥</span>
+                <span>Download as CSV</span>
+            </a>
+        </div>
+    </div>
+
+    <!-- Scrollable Box Container -->
+    <div class="scrollable-attention-box" id="attention-scroll-box">
+        {% for s in attention_students %}
+            <a href="{{ url_for('student_detail_view', uid=s.uid) }}" class="attention-row-clickable attention-item" data-name="{{ s.name|lower }}" data-uid="{{ s.uid|lower }}" title="View detail profile for {{ s.name }}">
+                <!-- Student UID & Name -->
+                <div class="attention-student-meta">
+                    <div class="attention-avatar">
+                        {{ s.initials }}
+                    </div>
+                    <div class="attention-name-block">
+                        <span class="attention-name-text">{{ s.name }}</span>
+                        <span class="attention-uid-tag">UID: {{ s.uid }}</span>
+                    </div>
+                </div>
+
+                <!-- Primary Concern -->
+                <div style="display: flex; align-items: center; gap: 0.5rem; flex: 1; padding: 0 1rem;">
+                    <span style="font-size: 0.85rem; color: #b45309; background: #fffbeb; border: 1px solid #fde68a; padding: 0.2rem 0.6rem; border-radius: var(--radius-full); font-weight: 500;">
+                        ⚠️ {{ s.primary_concern }}
+                    </span>
+                </div>
+
+                <!-- Metrics Group: Score & Attendance -->
+                <div class="attention-metrics-group">
+                    <div class="attention-metric-item">
+                        <span class="attention-metric-label">Success Score</span>
+                        <span class="attention-metric-val critical">{{ s.success_score }}</span>
+                    </div>
+
+                    <div class="attention-metric-item">
+                        <span class="attention-metric-label">Attendance</span>
+                        <span class="attention-metric-val" style="color: {{ 'var(--danger-text)' if s.raw_attendance_pct < 65.0 else 'var(--text-main)' }};">
+                            {{ s.attendance }}
+                        </span>
+                    </div>
+
+                    <!-- Priority Badge -->
+                    <span class="badge-priority {{ s.priority|lower }}">
+                        {{ s.priority }} Priority
+                    </span>
+                </div>
+
+                <!-- Action link text -->
+                <span class="btn-table-action" style="margin-left: 0.5rem;">View Details →</span>
+            </a>
+        {% else %}
+            <div style="padding: 3rem; text-align: center; color: var(--text-muted);">
+                🎉 No students in this cohort currently trigger risk attention thresholds!
+            </div>
+        {% endfor %}
+    </div>
+</section>
+
+<!-- =========================================================================
+     3. KEY TRENDS SECTION (2 Chart.js Charts: Score Distribution & Attendance)
+     ========================================================================= -->
+<section class="trends-section-container" aria-label="Cohort Key Trends & Analytics">
+    <div class="section-title-wrap">
+        <div>
+            <h2>Key Trends & Distribution</h2>
+            <p>Analytical patterns across score risk bands and subject-wise attendance benchmarks.</p>
+        </div>
+        <div style="font-size: 0.85rem; color: var(--text-muted);">
+            Cohort: <strong>{{ batch.batch_name }}</strong>
+        </div>
+    </div>
+
+    <div class="trends-charts-grid">
+        <!-- Chart 1: Score Distribution (Low / Medium / High Bands) -->
+        <div class="chart-card">
+            <div class="chart-card-header">
+                <h3 class="chart-card-title">Score Distribution by Risk Bands</h3>
+                <span style="font-size: 0.75rem; background: var(--bg-subtle); padding: 0.25rem 0.5rem; border-radius: 4px; color: var(--text-muted);">
+                    Low &lt;50 • Med 50-64 • High 65+
+                </span>
+            </div>
+            <div class="chart-canvas-wrapper">
+                <canvas id="scoreBandsChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Chart 2: Average Attendance Trend by Subject -->
+        <div class="chart-card">
+            <div class="chart-card-header">
+                <h3 class="chart-card-title">Average Attendance Trend by Subject</h3>
+                <span style="font-size: 0.75rem; background: var(--bg-subtle); padding: 0.25rem 0.5rem; border-radius: 4px; color: var(--text-muted);">
+                    Department Benchmark: 75%
+                </span>
+            </div>
+            <div class="chart-canvas-wrapper">
+                <canvas id="attendanceTrendChart"></canvas>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- =========================================================================
+     4. THREE NAVIGATION CARDS (Students List, At-Risk & Segments, Data Management)
+     ========================================================================= -->
+<section class="overview-flow-cards" aria-label="Platform Module Navigation">
+    <!-- Card 1: STUDENTS LIST -->
+    <a href="{{ url_for('students_view') }}" class="flow-card">
+        <div>
+            <div class="flow-card-icon">👥</div>
+            <h3 class="flow-card-title">STUDENTS LIST</h3>
+            <p class="flow-card-desc">
+                Searchable, filterable table of all students with UID, CGPA, attendance, composite score, and risk flags.
+            </p>
+        </div>
+        <span class="flow-card-action">Open Students List →</span>
+    </a>
+
+    <!-- Card 2: AT-RISK & SEGMENTS -->
+    <a href="{{ url_for('at_risk_view') }}" class="flow-card">
+        <div>
+            <div class="flow-card-icon">⚠️</div>
+            <h3 class="flow-card-title">AT-RISK & SEGMENTS</h3>
+            <p class="flow-card-desc">
+                Actionable rosters for academic risk, placement readiness risk, and 6 rule-based student behavior segments.
+            </p>
+        </div>
+        <span class="flow-card-action">View At-Risk & Segments →</span>
+    </a>
+
+    <!-- Card 3: DATA MANAGEMENT -->
+    <a href="{{ url_for('data_management_view') }}" class="flow-card" onclick="openDataMgmtWarningModal(event)">
+        <div>
+            <div class="flow-card-icon">⚙️</div>
+            <h3 class="flow-card-title">DATA MANAGEMENT</h3>
+            <p class="flow-card-desc">
+                Protected administrator portal to safely update or add student performance data with automated score recalculation.
+            </p>
+        </div>
+        <span class="flow-card-action">Manage Student Data →</span>
+    </a>
+</section>
+
+<!-- Warning Modal BEFORE entering Data Management -->
+<div id="dataMgmtWarningModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="dataMgmtModalTitle" onclick="closeDataMgmtModalOnBackdrop(event)">
+    <div class="modal-dialog" style="max-width: 520px; text-align: center; padding: 2.25rem 2rem;">
+        <div style="font-size: 3.25rem; margin-bottom: 1rem;">
+            {% if session.role == 'Admin' %}⚠️{% else %}🔒{% endif %}
+        </div>
+        <h3 id="dataMgmtModalTitle" style="font-size: 1.35rem; font-weight: 800; color: var(--brand-navy-900); margin-bottom: 0.75rem;">
+            {% if session.role == 'Admin' %}Administrative Modification Warning{% else %}View-Only Access Mode{% endif %}
+        </h3>
+        <p style="font-size: 0.95rem; color: var(--text-muted); line-height: 1.55; margin-bottom: 2rem;">
+            {% if session.role == 'Admin' %}
+                You are about to modify student records. Changes affect scores and risk flags for the whole batch and are logged. Continue?
+            {% else %}
+                View only: You are signed in as Faculty. Modification controls are reserved for Administrators. Only Admin can modify student records.
+            {% endif %}
+        </p>
+        <div style="display: flex; gap: 1rem; justify-content: center;">
+            <button type="button" class="btn-action-light" onclick="closeDataMgmtModal()" style="min-width: 120px; padding: 0.75rem 1.5rem;">
+                Cancel
+            </button>
+            <a href="{{ url_for('data_management_view') }}" class="btn-primary" style="min-width: 150px; padding: 0.75rem 1.5rem; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; background-color: {% if session.role == 'Admin' %}#dc2626{% else %}var(--brand-blue){% endif %};">
+                {% if session.role == 'Admin' %}Continue{% else %}Continue (View Only){% endif %}
+            </a>
+        </div>
+    </div>
+</div>
+
+<!-- =========================================================================
+     5. "HOW IS THE SCORE CALCULATED?" ACCESSIBLE MODAL
+     ========================================================================= -->
+<div id="scoringModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modalTitle" onclick="closeScoringModalOnBackdrop(event)">
+    <div class="modal-dialog">
+        <div class="modal-header">
+            <h3 id="modalTitle">📐 How is the Success Score Calculated?</h3>
+            <button type="button" class="btn-modal-close" onclick="closeScoringModal()" aria-label="Close modal">✕</button>
+        </div>
+        <div class="modal-body">
+            <p style="font-size: 0.9rem; color: var(--text-muted); line-height: 1.5;">
+                The <strong>Success Score (0–100)</strong> is a multi-dimensional composite index designed to assess student academic health, employability readiness, and campus engagement.
+            </p>
+
+            <h4 style="margin-top: 1.25rem; font-size: 1rem; color: var(--text-main);">Official Indicator Weights</h4>
+            <table class="weights-table">
+                <thead>
+                    <tr>
+                        <th>Indicator Domain</th>
+                        <th>Weight</th>
+                        <th>Measurement Focus</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for w in scoring_weights %}
+                        <tr>
+                            <td><strong>{{ w.name }}</strong></td>
+                            <td><span class="weight-badge">{{ w.weight }}%</span></td>
+                            <td style="color: var(--text-muted);">{{ w.desc }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+
+            <div style="background-color: var(--bg-subtle); border: 1px solid var(--border-light); border-radius: var(--radius-sm); padding: 1rem; margin-top: 1rem;">
+                <h5 style="font-size: 0.85rem; font-weight: 700; margin-bottom: 0.35rem;">Readiness Sub-Scores:</h5>
+                <ul style="font-size: 0.825rem; color: var(--text-muted); padding-left: 1.25rem; line-height: 1.5;">
+                    <li><strong>Academic Readiness (0–100):</strong> Weighted combination of Exams, Internal Assessments, Attendance, and LMS Engagement.</li>
+                    <li><strong>Placement Readiness (0–100):</strong> Weighted combination of Placement tests, Technical/Soft Skills, and Extracurriculars.</li>
+                    <li><strong>High Risk Threshold:</strong> Score &lt; 50, OR Attendance &lt; 65%, OR Active Backlogs &ge; 3.</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts_extra %}
+<!-- Chart.js Library -->
+<script src="{{ url_for('static', filename='js/chart.min.js') }}"></script>
+
+<script>
+    // -------------------------------------------------------------------------
+    // 1. Live Filter for Scrollable Attention Box
+    // -------------------------------------------------------------------------
+    function filterAttentionBox() {
+        const input = document.getElementById('attention-box-search');
+        const query = input.value.toLowerCase().trim();
+        const rows = document.querySelectorAll('#attention-scroll-box .attention-item');
+
+        rows.forEach(row => {
+            const name = row.getAttribute('data-name') || '';
+            const uid = row.getAttribute('data-uid') || '';
+            if (name.includes(query) || uid.includes(query)) {
+                row.style.display = 'flex';
+            } else {
+                row.style.display = 'none';
+            }
+        });
+    }
+
+    // -------------------------------------------------------------------------
+    // 2. Score Calculation Modal Toggle
+    // -------------------------------------------------------------------------
+    function openScoringModal() {
+        const modal = document.getElementById('scoringModal');
+        if (modal) {
+            modal.classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+    }
+
+    function closeScoringModal() {
+        const modal = document.getElementById('scoringModal');
+        if (modal) {
+            modal.classList.remove('active');
+            document.body.style.overflow = '';
+        }
+    }
+
+    function closeScoringModalOnBackdrop(event) {
+        if (event.target.id === 'scoringModal') {
+            closeScoringModal();
+        }
+    }
+
+    // Keyboard dismissal with Escape key
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closeScoringModal();
+        }
+    });
+
+    // -------------------------------------------------------------------------
+    // 3. Dynamic Chart.js Rendering for Trends Section
+    // -------------------------------------------------------------------------
+    let scoreChartInstance = null;
+    let attendanceChartInstance = null;
+
+    async function loadBatchTrends(batchCode) {
+        try {
+            const response = await fetch(`/api/trends?batch_code=${encodeURIComponent(batchCode)}`);
+            const data = await response.json();
+
+            if (!data.success) {
+                console.error("Failed to load trends data:", data.error);
+                return;
+            }
+
+            // 1. Render Score Distribution (Low / Medium / High Bands)
+            const scoreCtx = document.getElementById('scoreBandsChart');
+            if (scoreCtx && data.score_bands) {
+                if (scoreChartInstance) scoreChartInstance.destroy();
+
+                scoreChartInstance = new Chart(scoreCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: data.score_bands.labels,
+                        datasets: [{
+                            label: 'Students Count',
+                            data: data.score_bands.data,
+                            backgroundColor: [
+                                'rgba(239, 68, 68, 0.85)',   // Low (<50) Red
+                                'rgba(245, 158, 11, 0.85)',  // Medium (50-64) Amber
+                                'rgba(16, 185, 129, 0.85)'   // High (65+) Emerald
+                            ],
+                            borderColor: [
+                                '#dc2626',
+                                '#d97706',
+                                '#059669'
+                            ],
+                            borderWidth: 1.5,
+                            borderRadius: 6
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        return ` ${context.parsed.y} students in this band`;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                ticks: { stepSize: 10, precision: 0 },
+                                grid: { color: '#f1f5f9' }
+                            },
+                            x: {
+                                grid: { display: false }
+                            }
+                        }
+                    }
+                });
+            }
+
+            // 2. Render Average Attendance Trend by Subject
+            const attCtx = document.getElementById('attendanceTrendChart');
+            if (attCtx && data.attendance_trend) {
+                if (attendanceChartInstance) attendanceChartInstance.destroy();
+
+                attendanceChartInstance = new Chart(attCtx, {
+                    type: 'line',
+                    data: {
+                        labels: data.attendance_trend.labels,
+                        datasets: [
+                            {
+                                label: 'Class Attendance %',
+                                data: data.attendance_trend.data,
+                                borderColor: '#2563eb',
+                                backgroundColor: 'rgba(37, 99, 235, 0.08)',
+                                fill: true,
+                                tension: 0.35,
+                                pointBackgroundColor: '#2563eb',
+                                pointRadius: 5,
+                                pointHoverRadius: 7,
+                                borderWidth: 2.5
+                            },
+                            {
+                                label: 'Benchmark Threshold (75%)',
+                                data: data.attendance_trend.labels.map(() => 75.0),
+                                borderColor: '#ef4444',
+                                borderDash: [6, 6],
+                                fill: false,
+                                pointRadius: 0,
+                                borderWidth: 1.5
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: true,
+                                position: 'top',
+                                labels: { boxWidth: 12, font: { size: 11 } }
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        return ` ${context.dataset.label}: ${context.parsed.y}%`;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            y: {
+                                min: 40,
+                                max: 100,
+                                ticks: {
+                                    callback: function(value) { return value + '%'; }
+                                },
+                                grid: { color: '#f1f5f9' }
+                            },
+                            x: {
+                                grid: { display: false },
+                                ticks: { font: { size: 11 } }
+                            }
+                        }
+                    }
+                });
+            }
+
+        } catch (err) {
+            console.error("Error fetching trend data for Chart.js:", err);
+        }
+    }
+
+    // Data Management Entry Warning Modal
+    function openDataMgmtWarningModal(evt) {
+        if (evt) evt.preventDefault();
+        const modal = document.getElementById("dataMgmtWarningModal");
+        if (modal) modal.classList.add("active");
+        document.body.style.overflow = "hidden";
+    }
+
+    function closeDataMgmtModal() {
+        const modal = document.getElementById("dataMgmtWarningModal");
+        if (modal) modal.classList.remove("active");
+        document.body.style.overflow = "";
+    }
+
+    function closeDataMgmtModalOnBackdrop(evt) {
+        if (evt.target.id === "dataMgmtWarningModal") {
+            closeDataMgmtModal();
+        }
+    }
+
+    // Initialize charts upon page load
+    document.addEventListener('DOMContentLoaded', () => {
+        const activeBatch = "{{ batch.batch_code }}";
+        loadBatchTrends(activeBatch);
+    });
+</script>
+{% endblock %}

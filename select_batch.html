@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block title %}Select Academic Batch{% endblock %}
+
+{% block content %}
+<!-- Standard Page Header Bar (Back Button Pattern) -->
+<div class="page-header-bar">
+    <div class="page-header-left">
+        {% if session.get('batch_code') %}
+            <a href="{{ url_for('overview') }}" class="btn-back-arrow" title="Return to Overview">
+                ←
+            </a>
+        {% else %}
+            <div class="btn-back-arrow" style="cursor: default; opacity: 0.5;" title="Select a cohort">
+                📁
+            </div>
+        {% endif %}
+        <div class="page-title-block">
+            <h1>Select Academic Batch</h1>
+            <p>Choose a student cohort to monitor performance, evaluate risks, and review class analytics.</p>
+        </div>
+    </div>
+
+    <!-- Active Cohort Pill (if one is currently selected) -->
+    {% if session.get('batch_code') %}
+        <div class="cohort-info-pill">
+            <span>Active: <strong>{{ session.get('batch_code') }}</strong></span>
+            <a href="{{ url_for('overview') }}">Go to Dashboard →</a>
+        </div>
+    {% endif %}
+</div>
+
+<!-- Quick Batch Selection Dropdown Bar -->
+<div class="card" style="padding: 1.25rem 1.75rem; margin-bottom: 2rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
+    <div style="display: flex; align-items: center; gap: 0.75rem;">
+        <span style="font-size: 1.25rem;">⚡</span>
+        <div>
+            <div style="font-size: 0.95rem; font-weight: 700;">Quick Cohort Switcher</div>
+            <div style="font-size: 0.8rem; color: var(--text-muted);">Switch immediately or click any cohort card below</div>
+        </div>
+    </div>
+    <form method="POST" action="{{ url_for('select_batch') }}" style="display: flex; align-items: center; gap: 0.75rem;">
+        <select name="batch_code" style="padding: 0.55rem 1rem; border: 1.5px solid var(--border-medium); border-radius: var(--radius-sm); font-size: 0.9rem; font-weight: 600; background-color: #ffffff; color: var(--text-main); cursor: pointer;" onchange="this.form.submit()">
+            <option value="" disabled {% if not session.get('batch_code') %}selected{% endif %}>-- Choose Academic Batch --</option>
+            {% for b in batches %}
+                <option value="{{ b.batch_code }}" {% if session.get('batch_code') == b.batch_code %}selected{% endif %}>
+                    {{ b.batch_name }} ({{ b.department }} • {{ b.student_count }} Students)
+                </option>
+            {% endfor %}
+        </select>
+        <button type="submit" class="btn-table-action" style="padding: 0.55rem 1.1rem; font-size: 0.875rem;">
+            Load Cohort
+        </button>
+    </form>
+</div>
+
+<!-- Hidden POST form triggered when user clicks any batch card -->
+<form id="batch-form" method="POST" action="{{ url_for('select_batch') }}" style="display: none;">
+    <input type="hidden" id="selected-batch" name="batch_code" value="">
+</form>
+
+<!-- Batch Cards Grid -->
+<div class="batch-grid">
+    {% for batch in batches %}
+        <div class="batch-selection-card" onclick="selectBatch('{{ batch.batch_code }}')" role="button" tabindex="0" title="Open {{ batch.batch_name }} Class Analytics">
+            <div class="batch-card-top">
+                <span class="batch-dept-tag">{{ batch.department }}</span>
+                <h2 class="batch-card-title">{{ batch.batch_name }}</h2>
+                <div class="batch-academic-years">
+                    Academic Cycle: {{ batch.start_year }} – {{ batch.end_year }} • 4-Year B.Tech
+                </div>
+            </div>
+
+            <!-- Key Cohort Metrics Preview -->
+            <div class="batch-stats-box">
+                <div class="batch-stats-row">
+                    <span class="batch-stat-label">Enrolled Students:</span>
+                    <span class="batch-stat-value" style="color: var(--brand-blue); font-size: 1.15rem;">
+                        {{ batch.student_count }}
+                    </span>
+                </div>
+                <div class="batch-stats-row">
+                    <span class="batch-stat-label">Class Average Score:</span>
+                    <span class="batch-stat-value">
+                        {{ batch.avg_score if batch.avg_score is defined else '45.8%' }}
+                    </span>
+                </div>
+                <div class="batch-stats-row">
+                    <span class="batch-stat-label">Average Attendance:</span>
+                    <span class="batch-stat-value">
+                        {{ batch.avg_att if batch.avg_att is defined else '63.8%' }}
+                    </span>
+                </div>
+                <div class="batch-stats-row">
+                    <span class="batch-stat-label">Status:</span>
+                    <span class="badge-priority medium" style="font-size: 0.7rem;">
+                        Active Semester
+                    </span>
+                </div>
+            </div>
+
+            <button type="button" class="btn-select-batch-action">
+                <span>Open Analytics Dashboard</span>
+                <span aria-hidden="true">➔</span>
+            </button>
+        </div>
+    {% else %}
+        <div class="card" style="grid-column: 1 / -1; padding: 3rem; text-align: center; color: var(--text-muted);">
+            <h3>No academic batches found in database</h3>
+            <p style="margin-top: 0.5rem;">Please initialize data via <code>python clean_and_merge.py</code>.</p>
+        </div>
+    {% endfor %}
+</div>
+{% endblock %}

@@ -1,0 +1,989 @@
+{% extends "base.html" %}
+
+{% block title %}Data Management & Quality Control | {{ batch.batch_name }}{% endblock %}
+
+{% block content %}
+<!-- Standard Page Header Bar (Consistent with Overview, Students List, and At-Risk) -->
+<div class="page-header-bar">
+    <div class="page-header-left">
+        <a href="{{ url_for('overview') }}" class="btn-back-arrow" title="Back to Overview">
+            ←
+        </a>
+        <div class="page-title-block">
+            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                <h1>Data Management &amp; Quality Control</h1>
+                {% if not is_admin %}
+                    <span class="badge-view-only" style="background: #fef3c7; color: #b45309; border: 1px solid #fcd34d; font-size: 0.75rem; font-weight: 700; padding: 0.25rem 0.65rem; border-radius: var(--radius-full);">
+                        🔒 View-Only Mode (Faculty)
+                    </span>
+                {% else %}
+                    <span class="badge-view-only" style="background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; font-size: 0.75rem; font-weight: 700; padding: 0.25rem 0.65rem; border-radius: var(--radius-full);">
+                        ⚡ Admin Privileges
+                    </span>
+                {% endif %}
+            </div>
+            <p>Maintain cohort data integrity, modify student records, ingest CSV data with automated cleaning, review data quality reports, and inspect audit logs.</p>
+        </div>
+    </div>
+
+    <!-- Top-Right Cohort Badge & Batch Switcher -->
+    <div class="cohort-info-pill">
+        <span>📖 {{ batch.department }} • Batch <strong>{{ batch.batch_name }}</strong></span>
+        <a href="{{ url_for('select_batch') }}" title="Switch to another batch">Change Batch</a>
+    </div>
+</div>
+
+<!-- =========================================================================
+     0. FACULTY VIEW-ONLY PERSISTENT ALERT BANNER
+     ========================================================================= -->
+{% if not is_admin %}
+<div class="alert-box info" style="margin-bottom: 2rem; background: #fffbeb; border: 1.5px solid #fde68a; color: #92400e;">
+    <span style="font-size: 1.25rem;">🔒</span>
+    <div>
+        <strong>View-Only Mode Active:</strong> You are signed in as <strong>Faculty</strong> ({{ session.full_name }}). Modification controls (Add Student, Inline Record Editing, CSV Upload) are restricted to Administrators. You have view-only access to inspect performance metrics, data quality reports, and administrative audit trails.
+    </div>
+</div>
+{% endif %}
+
+<!-- =========================================================================
+     WARNING MODAL BEFORE ENTERING / MODIFYING
+     ========================================================================= -->
+<div 
+    id="dataMgmtWarningModal" 
+    class="modal-backdrop {% if not confirmed %}active{% endif %}" 
+    role="dialog" 
+    aria-modal="true" 
+    aria-labelledby="warningModalTitle"
+>
+    <div class="modal-dialog" style="max-width: 540px; text-align: center; padding: 2.25rem 2rem;">
+        <div style="font-size: 3.5rem; margin-bottom: 1rem;" aria-hidden="true">
+            {% if is_admin %}⚠️{% else %}🔒{% endif %}
+        </div>
+        <h3 id="warningModalTitle" style="font-size: 1.35rem; font-weight: 800; color: var(--brand-navy-900); margin-bottom: 0.75rem;">
+            {% if is_admin %}Security Warning: Modifying Student Records{% else %}View-Only Access Mode{% endif %}
+        </h3>
+        <p style="font-size: 0.95rem; color: var(--text-muted); line-height: 1.55; margin-bottom: 2rem;">
+            {% if is_admin %}
+                You are about to modify student records. Changes affect scores and risk flags for the whole batch and are logged. Continue?
+            {% else %}
+                View only: You are signed in as Faculty. Modification controls are reserved for Administrators. Only Admin can modify student records.
+            {% endif %}
+        </p>
+        <div style="display: flex; gap: 1rem; justify-content: center;">
+            <a href="{{ url_for('overview') }}" class="btn-action-light" style="min-width: 130px; padding: 0.75rem 1.5rem; text-decoration: none; display: inline-flex; align-items: center; justify-content: center;">
+                Cancel
+            </a>
+            <button 
+                type="button" 
+                class="btn-primary" 
+                onclick="dismissWarningModal()" 
+                style="min-width: 150px; padding: 0.75rem 1.5rem; background-color: {% if is_admin %}#dc2626{% else %}var(--brand-blue){% endif %};"
+            >
+                {% if is_admin %}Continue{% else %}Continue (View Only){% endif %}
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- =========================================================================
+     SECTION NAVIGATION TABS / PILLS
+     ========================================================================= -->
+<nav class="data-mgmt-nav-tabs" aria-label="Data Management Sub-modules">
+    <a href="#editable-records-section" class="data-mgmt-tab-btn active" onclick="activateTab(event, 'editable-records-section')">
+        <span>📋</span>
+        <span>Editable Records ({{ students|length }})</span>
+    </a>
+    <a href="#add-student-section" class="data-mgmt-tab-btn" onclick="activateTab(event, 'add-student-section')">
+        <span>➕</span>
+        <span>Add Student</span>
+    </a>
+    <a href="#csv-upload-section" class="data-mgmt-tab-btn" onclick="activateTab(event, 'csv-upload-section')">
+        <span>📥</span>
+        <span>CSV Ingestion &amp; Cleaning</span>
+    </a>
+    <a href="#data-quality-section" class="data-mgmt-tab-btn" onclick="activateTab(event, 'data-quality-section')">
+        <span>📊</span>
+        <span>Data Quality Report ({{ data_quality_summary.total_fixes }})</span>
+    </a>
+    <a href="#audit-log-section" class="data-mgmt-tab-btn" onclick="activateTab(event, 'audit-log-section')">
+        <span>🛡️</span>
+        <span>Audit Log ({{ audit_logs|length }})</span>
+    </a>
+</nav>
+
+<!-- =========================================================================
+     1. EDITABLE TABLE OF STUDENTS
+     ========================================================================= -->
+<section id="editable-records-section" class="data-mgmt-section-card" aria-label="Editable Student Records">
+    <div class="section-header-block">
+        <div>
+            <h2><span>📋</span> Editable Student Records</h2>
+            <p>Directly modify student metrics. Any change triggers automatic recalculation of Success Scores, risk flags, and sub-scores with full audit logging.</p>
+        </div>
+        
+        <!-- Live Table Filter Box -->
+        <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+            <div class="search-input-box" style="width: 280px;">
+                <span class="search-icon-symbol" aria-hidden="true">🔍</span>
+                <input 
+                    type="text" 
+                    id="studentSearchInput" 
+                    placeholder="Filter UID or student name..." 
+                    onkeyup="filterStudentTable()"
+                    aria-label="Filter editable student records"
+                >
+            </div>
+            <select id="riskFilterSelect" class="filter-dropdown-select" onchange="filterStudentTable()" aria-label="Filter by risk flag" style="padding: 0.65rem 1rem;">
+                <option value="all">All Risk Levels</option>
+                <option value="High">High Risk</option>
+                <option value="Medium">Medium Risk</option>
+                <option value="Low">Low Risk</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Responsive Table -->
+    <div class="responsive-table-wrapper" style="max-height: 480px; overflow-y: auto;">
+        <table class="custom-table" id="editable-students-table">
+            <thead>
+                <tr>
+                    <th>Student &amp; UID</th>
+                    <th style="text-align: center;">CGPA</th>
+                    <th style="text-align: center;">Internal (/40)</th>
+                    <th style="text-align: center;">Exam (/60)</th>
+                    <th style="text-align: center;">Attendance</th>
+                    <th style="text-align: center;">Backlogs</th>
+                    <th style="text-align: center;">LMS Assg</th>
+                    <th style="text-align: center;">Aptitude</th>
+                    <th style="text-align: center;">Coding</th>
+                    <th style="text-align: center;">Success Score</th>
+                    <th style="text-align: center;">Risk Flag</th>
+                    <th style="text-align: right;">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in students %}
+                    <tr 
+                        class="student-table-row" 
+                        data-uid="{{ s.uid|lower }}" 
+                        data-name="{{ s.name|lower }}" 
+                        data-risk="{{ s.risk_level }}"
+                    >
+                        <!-- Student Meta -->
+                        <td>
+                            <div class="student-avatar-cell">
+                                <div class="student-avatar-badge" style="width: 32px; height: 32px; font-size: 0.8rem;" aria-hidden="true">
+                                    {{ s.initials }}
+                                </div>
+                                <div class="student-name-meta">
+                                    <span class="student-name-title" style="font-size: 0.875rem;">{{ s.name }}</span>
+                                    <span class="student-uid-sub" style="font-family: monospace; font-size: 0.75rem;">{{ s.uid }}</span>
+                                </div>
+                            </div>
+                        </td>
+
+                        <td style="text-align: center; font-weight: 700;">{{ s.cgpa }}</td>
+                        <td style="text-align: center;">{{ s.internal_avg }}</td>
+                        <td style="text-align: center;">{{ s.exam_avg }}</td>
+                        <td style="text-align: center; font-weight: 600; color: {{ 'var(--danger-text)' if s.attendance_overall < 65.0 else 'inherit' }};">
+                            {{ s.attendance_overall }}%
+                        </td>
+                        <td style="text-align: center; color: {{ 'var(--danger-text)' if s.backlogs > 2 else 'inherit' }}; font-weight: {{ '700' if s.backlogs > 2 else 'normal' }};">
+                            {{ s.backlogs }}
+                        </td>
+                        <td style="text-align: center;">{{ s.lms_assignment_pct }}%</td>
+                        <td style="text-align: center;">{{ s.aptitude_score }}</td>
+                        <td style="text-align: center;">{{ s.coding_score }}</td>
+
+                        <!-- Recalculated Success Score Badge -->
+                        <td style="text-align: center; font-weight: 800; font-size: 0.95rem; color: var(--brand-navy-900);">
+                            {{ s.success_score }}%
+                        </td>
+
+                        <!-- Risk Flag Badge -->
+                        <td style="text-align: center;">
+                            {% if s.risk_level == 'High' %}
+                                <span class="status-badge high-risk">● High</span>
+                            {% elif s.risk_level == 'Medium' %}
+                                <span class="status-badge medium-risk">● Medium</span>
+                            {% else %}
+                                <span class="status-badge low-risk">● Low</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Action Button -->
+                        <td style="text-align: right;">
+                            {% if is_admin %}
+                                <button 
+                                    type="button" 
+                                    class="btn-edit-table-row" 
+                                    onclick="openEditModal({{ s|tojson }})" 
+                                    title="Edit metrics for {{ s.name }}"
+                                >
+                                    <span>✏️ Edit</span>
+                                </button>
+                            {% else %}
+                                <button 
+                                    type="button" 
+                                    class="btn-edit-table-row" 
+                                    disabled 
+                                    title="View only mode: Only Administrators may edit student metrics"
+                                >
+                                    <span>🔒 View Only</span>
+                                </button>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<!-- =========================================================================
+     2. ADD NEW STUDENT FORM
+     ========================================================================= -->
+<section id="add-student-section" class="data-mgmt-section-card" aria-label="Add Student Form">
+    <div class="section-header-block">
+        <div>
+            <h2><span>➕</span> Add New Student Record</h2>
+            <p>Enroll a new student into the active batch. Scores, risk classifications, and sub-indicators will recalculate automatically across the cohort.</p>
+        </div>
+        {% if not is_admin %}
+            <span style="font-size: 0.8rem; color: #b45309; background: #fef3c7; border: 1px solid #fcd34d; padding: 0.3rem 0.75rem; border-radius: var(--radius-sm); font-weight: 600;">
+                🔒 Faculty View: Adding students is disabled
+            </span>
+        {% endif %}
+    </div>
+
+    <!-- Alert placeholder for AJAX feedback -->
+    <div id="addStudentAlert" style="display: none; margin-bottom: 1.5rem;"></div>
+
+    <form id="addStudentForm" onsubmit="submitAddStudent(event)">
+        <!-- Row 1: Identification & Cohort -->
+        <div class="form-grid-3">
+            <div class="form-field-group">
+                <label for="add_uid">Student UID *</label>
+                <input 
+                    type="text" 
+                    id="add_uid" 
+                    name="uid" 
+                    class="input-control" 
+                    placeholder="e.g. CSE2023061" 
+                    required 
+                    {% if not is_admin %}disabled{% endif %}
+                >
+                <span class="form-help-hint">Unique alphanumeric identifier (e.g. CSE2023061)</span>
+            </div>
+
+            <div class="form-field-group">
+                <label for="add_name">Full Name *</label>
+                <input 
+                    type="text" 
+                    id="add_name" 
+                    name="name" 
+                    class="input-control" 
+                    placeholder="e.g. Ananya Sharma" 
+                    required 
+                    {% if not is_admin %}disabled{% endif %}
+                >
+                <span class="form-help-hint">Student legal full name (min 2 characters)</span>
+            </div>
+
+            <div class="form-field-group">
+                <label for="add_batch_code">Batch Code *</label>
+                <select id="add_batch_code" name="batch_code" class="input-control" required {% if not is_admin %}disabled{% endif %}>
+                    {% for b in batches %}
+                        <option value="{{ b.batch_code }}" {% if b.batch_code == batch.batch_code %}selected{% endif %}>
+                            {{ b.batch_name }} ({{ b.batch_code }})
+                        </option>
+                    {% endfor %}
+                </select>
+                <span class="form-help-hint">Academic cohort code</span>
+            </div>
+        </div>
+
+        <!-- Row 2: Academic Benchmarks -->
+        <div class="form-grid-4">
+            <div class="form-field-group">
+                <label for="add_cgpa">Cumulative GPA (0.0 - 10.0)</label>
+                <input 
+                    type="number" 
+                    id="add_cgpa" 
+                    name="cgpa" 
+                    class="input-control" 
+                    step="0.01" 
+                    min="0.0" 
+                    max="10.0" 
+                    value="7.50" 
+                    required 
+                    {% if not is_admin %}disabled{% endif %}
+                >
+                <span class="form-help-hint">Scale: 0.00 to 10.00</span>
+            </div>
+
+            <div class="form-field-group">
+                <label for="add_attendance">Overall Attendance % (0 - 100)</label>
+                <input 
+                    type="number" 
+                    id="add_attendance" 
+                    name="attendance_overall" 
+                    class="input-control" 
+                    step="0.1" 
+                    min="0.0" 
+                    max="100.0" 
+                    value="80.0" 
+                    required 
+                    {% if not is_admin %}disabled{% endif %}
+                >
+                <span class="form-help-hint">Scale: 0.0% to 100.0%</span>
+            </div>
+
+            <div class="form-field-group">
+                <label for="add_backlogs">Active Backlogs (0 - 20)</label>
+                <input 
+                    type="number" 
+                    id="add_backlogs" 
+                    name="backlogs" 
+                    class="input-control" 
+                    step="1" 
+                    min="0" 
+                    max="20" 
+                    value="0" 
+                    required 
+                    {% if not is_admin %}disabled{% endif %}
+                >
+                <span class="form-help-hint">Integer count of uncleared subjects</span>
+            </div>
+
+            <div class="form-field-group">
+                <label for="add_lms">LMS Assignment % (0 - 100)</label>
+                <input 
+                    type="number" 
+                    id="add_lms" 
+                    name="lms_assignment_pct" 
+                    class="input-control" 
+                    step="0.1" 
+                    min="0.0" 
+                    max="100.0" 
+                    value="85.0" 
+                    required 
+                    {% if not is_admin %}disabled{% endif %}
+                >
+                <span class="form-help-hint">Scale: 0.0% to 100.0%</span>
+            </div>
+        </div>
+
+        <!-- Row 3: Internal Assessments, Exams & Placements -->
+        <div class="form-grid-4">
+            <div class="form-field-group">
+                <label for="add_internal">Internal Marks Avg (0 - 40)</label>
+                <input 
+                    type="number" 
+                    id="add_internal" 
+                    name="internal_avg" 
+                    class="input-control" 
+                    step="0.1" 
+                    min="0.0" 
+                    max="40.0" 
+                    value="30.0" 
+                    required 
+                    {% if not is_admin %}disabled{% endif %}
+                >
+                <span class="form-help-hint">Scale: 0.0 to 40.0 marks</span>
+            </div>
+
+            <div class="form-field-group">
+                <label for="add_exam">Exam Marks Avg (0 - 60)</label>
+                <input 
+                    type="number" 
+                    id="add_exam" 
+                    name="exam_avg" 
+                    class="input-control" 
+                    step="0.1" 
+                    min="0.0" 
+                    max="60.0" 
+                    value="42.0" 
+                    required 
+                    {% if not is_admin %}disabled{% endif %}
+                >
+                <span class="form-help-hint">Scale: 0.0 to 60.0 marks</span>
+            </div>
+
+            <div class="form-field-group">
+                <label for="add_aptitude">Aptitude Score (0 - 100)</label>
+                <input 
+                    type="number" 
+                    id="add_aptitude" 
+                    name="aptitude_score" 
+                    class="input-control" 
+                    step="0.1" 
+                    min="0.0" 
+                    max="100.0" 
+                    value="70.0" 
+                    required 
+                    {% if not is_admin %}disabled{% endif %}
+                >
+                <span class="form-help-hint">Quantitative &amp; logical reasoning</span>
+            </div>
+
+            <div class="form-field-group">
+                <label for="add_coding">Coding Score (0 - 100)</label>
+                <input 
+                    type="number" 
+                    id="add_coding" 
+                    name="coding_score" 
+                    class="input-control" 
+                    step="0.1" 
+                    min="0.0" 
+                    max="100.0" 
+                    value="75.0" 
+                    required 
+                    {% if not is_admin %}disabled{% endif %}
+                >
+                <span class="form-help-hint">Hands-on programming tests</span>
+            </div>
+        </div>
+
+        <!-- Submit Button -->
+        <div style="margin-top: 1.5rem; display: flex; justify-content: flex-end;">
+            {% if is_admin %}
+                <button type="submit" class="btn-primary" id="btnSubmitAddStudent" style="padding: 0.75rem 2rem;">
+                    <span>➕ Add Student &amp; Recalculate Cohort</span>
+                </button>
+            {% else %}
+                <button type="button" class="btn-primary" disabled style="padding: 0.75rem 2rem; opacity: 0.6; cursor: not-allowed;">
+                    <span>🔒 Add Student (Admin Role Required)</span>
+                </button>
+            {% endif %}
+        </div>
+    </form>
+</section>
+
+<!-- =========================================================================
+     3. CSV FILE INGESTION & AUTOMATED CLEANING PIPELINE
+     ========================================================================= -->
+<section id="csv-upload-section" class="data-mgmt-section-card" aria-label="CSV File Upload">
+    <div class="section-header-block">
+        <div>
+            <h2><span>📥</span> CSV Upload &amp; Cleaning Pipeline</h2>
+            <p>Upload new cohort files or mass updates. Uploaded files automatically execute the data cleaning pipeline before updating the database.</p>
+        </div>
+        <a href="{{ url_for('download_template_csv') }}" class="btn-action-light" style="font-size: 0.85rem; padding: 0.5rem 1rem;">
+            <span>📥 Download Sample CSV Template</span>
+        </a>
+    </div>
+
+    <!-- 5-Step Pipeline Architecture Banner -->
+    <div style="background-color: #f8fafc; border: 1.5px solid var(--border-light); border-radius: var(--radius-sm); padding: 1.25rem 1.5rem; margin-bottom: 2rem;">
+        <div style="font-size: 0.8rem; font-weight: 800; text-transform: uppercase; color: var(--brand-navy-900); margin-bottom: 0.5rem; letter-spacing: 0.5px;">
+            ⚙️ Automated 5-Step Cleaning &amp; Merging Pipeline:
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; font-size: 0.825rem; color: var(--text-muted);">
+            <div><strong>1. UID Normalization:</strong> Strips whitespace and forces uppercase format.</div>
+            <div><strong>2. Duplicate Elimination:</strong> Drops duplicate entries by UID.</div>
+            <div><strong>3. Missing Imputation:</strong> Imputes missing numerical values with cohort medians.</div>
+            <div><strong>4. Range Clamping:</strong> Enforces domain bounds on CGPA, marks, and attendance.</div>
+            <div><strong>5. Dynamic Scoring:</strong> Recalculates Success Scores, risk flags, and explainability.</div>
+        </div>
+    </div>
+
+    <!-- Upload Form -->
+    <form action="{{ url_for('upload_csv') }}" method="POST" enctype="multipart/form-data">
+        <div class="csv-upload-dropzone" onclick="document.getElementById('csv_file_input').click()">
+            <div class="csv-dropzone-icon" aria-hidden="true">📄</div>
+            <div class="csv-dropzone-title">Click or drag a CSV file here to upload</div>
+            <div class="csv-dropzone-sub">Supported format: .csv (with required <code>uid</code> header)</div>
+            <input 
+                type="file" 
+                id="csv_file_input" 
+                name="csv_file" 
+                accept=".csv" 
+                style="display: none;" 
+                onchange="handleCsvFileSelected(this)"
+                {% if not is_admin %}disabled{% endif %}
+            >
+            <div id="selected-file-name" style="margin-top: 0.75rem; font-weight: 700; color: var(--brand-blue); font-size: 0.9rem;"></div>
+        </div>
+
+        <div style="margin-top: 1.5rem; display: flex; justify-content: flex-end; gap: 1rem; align-items: center;">
+            {% if is_admin %}
+                <button type="submit" class="btn-primary" id="btnUploadCsv" style="padding: 0.75rem 2rem;">
+                    <span>🚀 Ingest &amp; Run Cleaning Pipeline</span>
+                </button>
+            {% else %}
+                <span style="font-size: 0.85rem; color: var(--text-muted);">Only Administrators can upload data files.</span>
+                <button type="button" class="btn-primary" disabled style="padding: 0.75rem 2rem; opacity: 0.6; cursor: not-allowed;">
+                    <span>🔒 Upload CSV (Admin Only)</span>
+                </button>
+            {% endif %}
+        </div>
+    </form>
+</section>
+
+<!-- =========================================================================
+     4. DATA QUALITY AUDIT REPORT
+     ========================================================================= -->
+<section id="data-quality-section" class="data-mgmt-section-card" aria-label="Data Quality Audit Report">
+    <div class="section-header-block">
+        <div>
+            <h2><span>📊</span> Data Quality Audit Report</h2>
+            <p>Historical audit ledger recording every data anomaly detected, fixed, and imputed by the cleaning pipeline.</p>
+        </div>
+        <span style="font-size: 0.85rem; font-weight: 700; background: var(--bg-subtle); padding: 0.35rem 0.75rem; border-radius: var(--radius-sm); color: var(--brand-navy-900);">
+            Total Fixes Applied: {{ data_quality_summary.total_fixes }}
+        </span>
+    </div>
+
+    <!-- Summary KPI Mini-Cards -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1.25rem; margin-bottom: 2rem;">
+        <div class="stat-card" style="padding: 1rem;">
+            <div class="stat-content">
+                <span class="stat-label">UID Fixes</span>
+                <span class="stat-value" style="font-size: 1.5rem; color: #1e40af;">{{ data_quality_summary.uid_fixes }}</span>
+            </div>
+        </div>
+        <div class="stat-card" style="padding: 1rem;">
+            <div class="stat-content">
+                <span class="stat-label">Duplicates Dropped</span>
+                <span class="stat-value" style="font-size: 1.5rem; color: #991b1b;">{{ data_quality_summary.dup_fixes }}</span>
+            </div>
+        </div>
+        <div class="stat-card" style="padding: 1rem;">
+            <div class="stat-content">
+                <span class="stat-label">Missing Imputed</span>
+                <span class="stat-value" style="font-size: 1.5rem; color: #92400e;">{{ data_quality_summary.missing_fixes }}</span>
+            </div>
+        </div>
+        <div class="stat-card" style="padding: 1rem;">
+            <div class="stat-content">
+                <span class="stat-label">Ranges Clamped</span>
+                <span class="stat-value" style="font-size: 1.5rem; color: #5b21b6;">{{ data_quality_summary.clamp_fixes }}</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Report Table -->
+    <div class="responsive-table-wrapper" style="max-height: 380px; overflow-y: auto;">
+        <table class="custom-table">
+            <thead>
+                <tr>
+                    <th style="width: 60px;">ID</th>
+                    <th style="width: 200px;">Issue Type</th>
+                    <th>Anomaly Description &amp; Action Taken</th>
+                    <th style="text-align: center; width: 140px;">Affected Rows</th>
+                    <th style="width: 180px;">Logged Timestamp</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in data_quality_reports %}
+                    <tr>
+                        <td style="font-family: monospace; color: var(--text-muted);">#{{ r.id }}</td>
+                        <td>
+                            {% if 'UID' in r.issue_type %}
+                                <span class="badge-issue-type uid">🔤 {{ r.issue_type }}</span>
+                            {% elif 'Duplicate' in r.issue_type %}
+                                <span class="badge-issue-type dup">✂️ {{ r.issue_type }}</span>
+                            {% elif 'Missing' in r.issue_type %}
+                                <span class="badge-issue-type missing">🩹 {{ r.issue_type }}</span>
+                            {% else %}
+                                <span class="badge-issue-type clamp">📐 {{ r.issue_type }}</span>
+                            {% endif %}
+                        </td>
+                        <td style="font-size: 0.85rem; color: var(--text-main);">{{ r.description }}</td>
+                        <td style="text-align: center; font-weight: 700;">{{ r.count }}</td>
+                        <td style="font-family: monospace; font-size: 0.775rem; color: var(--text-muted);">{{ r.timestamp }}</td>
+                    </tr>
+                {% else %}
+                    <tr>
+                        <td colspan="5" style="text-align: center; padding: 2rem; color: var(--text-muted);">No data quality issues recorded.</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<!-- =========================================================================
+     5. ADMINISTRATIVE AUDIT LOG
+     ========================================================================= -->
+<section id="audit-log-section" class="data-mgmt-section-card" aria-label="System Audit Log">
+    <div class="section-header-block">
+        <div>
+            <h2><span>🛡️</span> Administrative Audit Log</h2>
+            <p>Immutable system audit trail logging all staff modifications, data additions, and CSV ingestion runs.</p>
+        </div>
+        <span style="font-size: 0.85rem; color: var(--text-muted); font-weight: 600;">Showing recent {{ audit_logs|length }} events</span>
+    </div>
+
+    <!-- Audit Log Table -->
+    <div class="responsive-table-wrapper" style="max-height: 420px; overflow-y: auto;">
+        <table class="custom-table">
+            <thead>
+                <tr>
+                    <th style="width: 170px;">Timestamp (UTC)</th>
+                    <th style="width: 160px;">Staff User</th>
+                    <th style="width: 140px;">Action</th>
+                    <th style="width: 130px;">Target UID</th>
+                    <th>Change Details</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in audit_logs %}
+                    <tr>
+                        <td style="font-family: monospace; font-size: 0.775rem; color: var(--text-muted);">
+                            {{ log.timestamp }}
+                        </td>
+                        <td>
+                            <strong>{{ log.username }}</strong>
+                            <span style="font-size: 0.75rem; color: var(--text-muted);">({{ log.role }})</span>
+                        </td>
+                        <td>
+                            {% if log.action == 'ADD_STUDENT' %}
+                                <span class="badge-audit-action add">➕ ADD</span>
+                            {% elif log.action == 'EDIT_STUDENT' %}
+                                <span class="badge-audit-action edit">✏️ EDIT</span>
+                            {% elif log.action == 'CSV_IMPORT' %}
+                                <span class="badge-audit-action csv">📥 CSV</span>
+                            {% else %}
+                                <span class="badge-audit-action">{{ log.action }}</span>
+                            {% endif %}
+                        </td>
+                        <td style="font-family: monospace; font-weight: 700; color: var(--brand-navy-900);">
+                            {{ log.target_uid }}
+                        </td>
+                        <td style="font-size: 0.825rem;">
+                            {% if log.details_parsed is mapping %}
+                                {% if log.details_parsed.message %}
+                                    <div style="font-weight: 600; color: var(--text-main); margin-bottom: 0.25rem;">{{ log.details_parsed.message }}</div>
+                                {% endif %}
+                                {% if log.details_parsed.changes %}
+                                    <div>
+                                        {% for c in log.details_parsed.changes %}
+                                            <span class="audit-diff-item">
+                                                <strong>{{ c.field }}:</strong> <span class="old">{{ c.old }}</span> → <span class="new">{{ c.new }}</span>
+                                            </span>
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                            {% else %}
+                                {{ log.details }}
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% else %}
+                    <tr>
+                        <td colspan="5" style="text-align: center; padding: 2rem; color: var(--text-muted);">No audit log entries recorded yet.</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<!-- =========================================================================
+     6. EDIT STUDENT MODAL (ADMIN ONLY)
+     ========================================================================= -->
+<div 
+    id="editStudentModal" 
+    class="modal-backdrop" 
+    role="dialog" 
+    aria-modal="true" 
+    aria-labelledby="editModalTitle" 
+    onclick="closeEditModalOnBackdrop(event)"
+>
+    <div class="modal-dialog" style="max-width: 680px;">
+        <div class="modal-header">
+            <div>
+                <h3 id="editModalTitle" style="font-size: 1.25rem; font-weight: 800; color: var(--brand-navy-900); margin: 0;">
+                    ✏️ Edit Student Record
+                </h3>
+                <span id="editModalSubtitle" style="font-size: 0.85rem; color: var(--text-muted);"></span>
+            </div>
+            <button type="button" class="modal-close-btn" onclick="closeEditModal()" aria-label="Close dialog">✕</button>
+        </div>
+
+        <form id="editStudentForm" onsubmit="submitEditStudent(event)">
+            <input type="hidden" id="edit_uid" name="uid">
+
+            <div class="modal-body" style="padding: 1.75rem 2rem;">
+                <div id="editStudentAlert" style="display: none; margin-bottom: 1.25rem;"></div>
+
+                <div class="form-grid-3">
+                    <div class="form-field-group">
+                        <label for="edit_name">Full Name *</label>
+                        <input type="text" id="edit_name" name="name" class="input-control" required>
+                    </div>
+
+                    <div class="form-field-group">
+                        <label for="edit_cgpa">CGPA (0.0 - 10.0) *</label>
+                        <input type="number" id="edit_cgpa" name="cgpa" class="input-control" step="0.01" min="0.0" max="10.0" required>
+                    </div>
+
+                    <div class="form-field-group">
+                        <label for="edit_attendance">Attendance % (0 - 100) *</label>
+                        <input type="number" id="edit_attendance" name="attendance_overall" class="input-control" step="0.1" min="0.0" max="100.0" required>
+                    </div>
+                </div>
+
+                <div class="form-grid-3">
+                    <div class="form-field-group">
+                        <label for="edit_internal">Internal Avg (0 - 40) *</label>
+                        <input type="number" id="edit_internal" name="internal_avg" class="input-control" step="0.1" min="0.0" max="40.0" required>
+                    </div>
+
+                    <div class="form-field-group">
+                        <label for="edit_exam">Exam Avg (0 - 60) *</label>
+                        <input type="number" id="edit_exam" name="exam_avg" class="input-control" step="0.1" min="0.0" max="60.0" required>
+                    </div>
+
+                    <div class="form-field-group">
+                        <label for="edit_backlogs">Active Backlogs (0 - 20) *</label>
+                        <input type="number" id="edit_backlogs" name="backlogs" class="input-control" step="1" min="0" max="20" required>
+                    </div>
+                </div>
+
+                <div class="form-grid-3">
+                    <div class="form-field-group">
+                        <label for="edit_lms">LMS Assg % (0 - 100) *</label>
+                        <input type="number" id="edit_lms" name="lms_assignment_pct" class="input-control" step="0.1" min="0.0" max="100.0" required>
+                    </div>
+
+                    <div class="form-field-group">
+                        <label for="edit_aptitude">Aptitude (0 - 100) *</label>
+                        <input type="number" id="edit_aptitude" name="aptitude_score" class="input-control" step="0.1" min="0.0" max="100.0" required>
+                    </div>
+
+                    <div class="form-field-group">
+                        <label for="edit_coding">Coding (0 - 100) *</label>
+                        <input type="number" id="edit_coding" name="coding_score" class="input-control" step="0.1" min="0.0" max="100.0" required>
+                    </div>
+                </div>
+
+                <div style="font-size: 0.775rem; color: var(--text-muted); background: #f8fafc; border: 1px solid var(--border-light); padding: 0.65rem 1rem; border-radius: var(--radius-sm); margin-top: 0.5rem;">
+                    💡 <strong>Automated Recalculation:</strong> Saving these edits will automatically update this student's composite Success Score, risk flags, and subscores.
+                </div>
+            </div>
+
+            <div class="modal-footer" style="padding: 1rem 2rem; border-top: 1px solid var(--border-light); display: flex; justify-content: flex-end; gap: 0.75rem;">
+                <button type="button" class="btn-action-light" onclick="closeEditModal()">Cancel</button>
+                <button type="submit" class="btn-primary" id="btnSaveEditStudent">
+                    <span>💾 Save Changes &amp; Recalculate</span>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts_extra %}
+<script>
+// -----------------------------------------------------------------------------
+// 1. Warning Entry Modal Controls
+// -----------------------------------------------------------------------------
+function dismissWarningModal() {
+    const modal = document.getElementById("dataMgmtWarningModal");
+    if (modal) {
+        modal.classList.remove("active");
+        document.body.style.overflow = "";
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 2. Tab Navigation
+// -----------------------------------------------------------------------------
+function activateTab(evt, sectionId) {
+    document.querySelectorAll(".data-mgmt-tab-btn").forEach(btn => btn.classList.remove("active"));
+    if (evt && evt.currentTarget) {
+        evt.currentTarget.classList.add("active");
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 3. Live Search & Risk Filter for Editable Students Table
+// -----------------------------------------------------------------------------
+function filterStudentTable() {
+    const query = (document.getElementById("studentSearchInput").value || "").trim().toLowerCase();
+    const risk = document.getElementById("riskFilterSelect").value;
+    const rows = document.querySelectorAll(".student-table-row");
+
+    rows.forEach(row => {
+        const uid = row.getAttribute("data-uid") || "";
+        const name = row.getAttribute("data-name") || "";
+        const rowRisk = row.getAttribute("data-risk") || "";
+
+        const matchesQuery = !query || uid.includes(query) || name.includes(query);
+        const matchesRisk = (risk === "all") || (rowRisk === risk);
+
+        row.style.display = (matchesQuery && matchesRisk) ? "" : "none";
+    });
+}
+
+// -----------------------------------------------------------------------------
+// 4. Edit Student Modal Logic
+// -----------------------------------------------------------------------------
+function openEditModal(student) {
+    document.getElementById("edit_uid").value = student.uid;
+    document.getElementById("editModalSubtitle").textContent = `UID: ${student.uid} • ${student.name}`;
+    document.getElementById("edit_name").value = student.name;
+    document.getElementById("edit_cgpa").value = student.cgpa;
+    document.getElementById("edit_attendance").value = student.attendance_overall;
+    document.getElementById("edit_internal").value = student.internal_avg;
+    document.getElementById("edit_exam").value = student.exam_avg;
+    document.getElementById("edit_backlogs").value = student.backlogs;
+    document.getElementById("edit_lms").value = student.lms_assignment_pct;
+    document.getElementById("edit_aptitude").value = student.aptitude_score;
+    document.getElementById("edit_coding").value = student.coding_score;
+
+    const alertBox = document.getElementById("editStudentAlert");
+    alertBox.style.display = "none";
+
+    const modal = document.getElementById("editStudentModal");
+    modal.classList.add("active");
+    document.body.style.overflow = "hidden";
+}
+
+function closeEditModal() {
+    const modal = document.getElementById("editStudentModal");
+    modal.classList.remove("active");
+    document.body.style.overflow = "";
+}
+
+function closeEditModalOnBackdrop(evt) {
+    if (evt.target.id === "editStudentModal") {
+        closeEditModal();
+    }
+}
+
+async function submitEditStudent(evt) {
+    evt.preventDefault();
+    const form = document.getElementById("editStudentForm");
+    const formData = new FormData(form);
+    const uid = formData.get("uid");
+
+    const payload = {};
+    formData.forEach((value, key) => {
+        if (key !== "uid") {
+            payload[key] = value;
+        }
+    });
+
+    const submitBtn = document.getElementById("btnSaveEditStudent");
+    const alertBox = document.getElementById("editStudentAlert");
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = "<span>Saving...</span>";
+
+    try {
+        const resp = await fetch(`/api/students/${uid}`, {
+            method: "PUT",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await resp.json();
+
+        if (resp.ok && data.success) {
+            alertBox.className = "alert-box success";
+            alertBox.innerHTML = `<span>✅</span> <span>${data.message} Reloading...</span>`;
+            alertBox.style.display = "flex";
+            setTimeout(() => {
+                window.location.reload();
+            }, 800);
+        } else {
+            alertBox.className = "alert-box error";
+            alertBox.innerHTML = `<span>⚠️</span> <span>${data.error || "Failed to update student"}</span>`;
+            alertBox.style.display = "flex";
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = "<span>💾 Save Changes & Recalculate</span>";
+        }
+    } catch (err) {
+        alertBox.className = "alert-box error";
+        alertBox.innerHTML = `<span>⚠️</span> <span>Network error: ${err.message}</span>`;
+        alertBox.style.display = "flex";
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = "<span>💾 Save Changes & Recalculate</span>";
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 5. Add Student Form Submission
+// -----------------------------------------------------------------------------
+async function submitAddStudent(evt) {
+    evt.preventDefault();
+    const form = document.getElementById("addStudentForm");
+    const formData = new FormData(form);
+    const payload = {};
+    formData.forEach((value, key) => {
+        payload[key] = value;
+    });
+
+    const submitBtn = document.getElementById("btnSubmitAddStudent");
+    const alertBox = document.getElementById("addStudentAlert");
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = "<span>Adding & Recalculating...</span>";
+    }
+
+    try {
+        const resp = await fetch("/api/students", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await resp.json();
+
+        if (resp.ok && data.success) {
+            alertBox.className = "alert-box success";
+            alertBox.innerHTML = `<span>✅</span> <span>${data.message} Cohort recalculation complete. Reloading...</span>`;
+            alertBox.style.display = "flex";
+            setTimeout(() => {
+                window.location.reload();
+            }, 800);
+        } else {
+            alertBox.className = "alert-box error";
+            alertBox.innerHTML = `<span>⚠️</span> <span>${data.error || "Failed to add student."}</span>`;
+            alertBox.style.display = "flex";
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = "<span>➕ Add Student & Recalculate Cohort</span>";
+            }
+        }
+    } catch (err) {
+        alertBox.className = "alert-box error";
+        alertBox.innerHTML = `<span>⚠️</span> <span>Network error: ${err.message}</span>`;
+        alertBox.style.display = "flex";
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = "<span>➕ Add Student & Recalculate Cohort</span>";
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 6. CSV File Picker Feedback
+// -----------------------------------------------------------------------------
+function handleCsvFileSelected(input) {
+    const feedback = document.getElementById("selected-file-name");
+    if (input.files && input.files[0]) {
+        feedback.textContent = `Selected: ${input.files[0].name} (${(input.files[0].size / 1024).toFixed(1)} KB)`;
+    } else {
+        feedback.textContent = "";
+    }
+}
+
+// Close modals on Escape key
+document.addEventListener("keydown", function(evt) {
+    if (evt.key === "Escape") {
+        const editModal = document.getElementById("editStudentModal");
+        if (editModal && editModal.classList.contains("active")) {
+            closeEditModal();
+        }
+    }
+});
+</script>
+{% endblock %}

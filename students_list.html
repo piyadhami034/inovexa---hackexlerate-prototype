@@ -1,0 +1,254 @@
+{% extends "base.html" %}
+
+{% block title %}Students Directory | {{ batch.batch_name }}{% endblock %}
+
+{% block content %}
+<!-- Standard Page Header Bar (Back Button Pattern) -->
+<div class="page-header-bar">
+    <div class="page-header-left">
+        <a href="{{ url_for('overview') }}" class="btn-back-arrow" title="Return to Batch Overview">
+            ←
+        </a>
+        <div class="page-title-block">
+            <h1>Students Directory</h1>
+            <p>Comprehensive roster of students in {{ batch.batch_name }} with success scores, attendance, and risk flags.</p>
+        </div>
+    </div>
+
+    <!-- Active Cohort Pill -->
+    <div class="cohort-info-pill">
+        <span>📖 {{ batch.department }} • Batch <strong>{{ batch.batch_name }}</strong></span>
+        <a href="{{ url_for('select_batch') }}" title="Switch to another batch">Change Batch</a>
+    </div>
+</div>
+
+<!-- =========================================================================
+     Search & Filters Toolbar
+     ========================================================================= -->
+<section class="filter-toolbar-box" aria-label="Student Filters and Search">
+    <form method="GET" action="{{ url_for('students_view') }}" id="filters-form" style="display: flex; align-items: center; justify-content: space-between; width: 100%; flex-wrap: wrap; gap: 1rem;">
+        <!-- Left: Search Box -->
+        <div class="search-input-box" style="flex: 1; min-width: 260px; max-width: 380px;">
+            <span class="search-icon-symbol" aria-hidden="true">🔍</span>
+            <input 
+                type="text" 
+                name="search" 
+                id="search-input" 
+                placeholder="Search by UID or student name..." 
+                value="{{ active_filters.search }}"
+                style="width: 100%;"
+                oninput="debounceSearch()"
+            >
+        </div>
+
+        <!-- Right: Filter Dropdowns -->
+        <div class="filter-controls-group">
+            <!-- Filter 1: Risk Level -->
+            <select name="risk" class="filter-select" onchange="this.form.submit()" aria-label="Filter by Risk Level">
+                <option value="all" {% if active_filters.risk == 'all' %}selected{% endif %}>All Risk Levels</option>
+                <option value="high" {% if active_filters.risk == 'high' %}selected{% endif %}>🔴 High Risk</option>
+                <option value="medium" {% if active_filters.risk == 'medium' %}selected{% endif %}>🟡 Medium Risk</option>
+                <option value="low" {% if active_filters.risk == 'low' %}selected{% endif %}>🟢 Low Risk</option>
+                <option value="attention" {% if active_filters.risk == 'attention' %}selected{% endif %}>⚠️ Needs Attention</option>
+            </select>
+
+            <!-- Filter 2: Cohort Segment -->
+            <select name="segment" class="filter-select" onchange="this.form.submit()" aria-label="Filter by Cohort Segment">
+                <option value="all" {% if active_filters.segment == 'all' %}selected{% endif %}>All Segments</option>
+                {% for seg in available_segments %}
+                    <option value="{{ seg }}" {% if active_filters.segment == seg %}selected{% endif %}>{{ seg }}</option>
+                {% endfor %}
+            </select>
+
+            <!-- Sort By Selector -->
+            <select name="sort_by" class="filter-select" onchange="this.form.submit()" aria-label="Sort by Column">
+                <option value="success_score" {% if active_filters.sort_by == 'success_score' %}selected{% endif %}>Sort by Score</option>
+                <option value="name" {% if active_filters.sort_by == 'name' %}selected{% endif %}>Sort by Name</option>
+                <option value="uid" {% if active_filters.sort_by == 'uid' %}selected{% endif %}>Sort by UID</option>
+                <option value="cgpa" {% if active_filters.sort_by == 'cgpa' %}selected{% endif %}>Sort by CGPA</option>
+                <option value="attendance_overall" {% if active_filters.sort_by == 'attendance_overall' %}selected{% endif %}>Sort by Attendance</option>
+            </select>
+
+            <!-- Sort Order Toggle -->
+            <input type="hidden" name="sort_order" id="sort_order_input" value="{{ active_filters.sort_order }}">
+            <button type="button" class="btn-filter-toggle" onclick="toggleSortOrder()" title="Toggle sort ascending/descending">
+                <span>{{ '▼ Desc' if active_filters.sort_order == 'desc' else '▲ Asc' }}</span>
+            </button>
+
+            <!-- Reset Filters -->
+            {% if active_filters.search or active_filters.risk != 'all' or active_filters.segment != 'all' %}
+                <a href="{{ url_for('students_view') }}" class="btn-reset-filters" title="Clear all filters">
+                    <span>✕</span>
+                    <span>Reset</span>
+                </a>
+            {% endif %}
+
+            <!-- Count Indicator -->
+            <span style="font-size: 0.85rem; font-weight: 600; color: var(--text-muted); margin-left: 0.5rem;">
+                {{ students|length }} Students
+            </span>
+        </div>
+    </form>
+</section>
+
+<!-- =========================================================================
+     Students Table (Matches design/4-students-list.png)
+     ========================================================================= -->
+<section class="data-table-card" aria-label="Class Students Table">
+    <div class="responsive-table-wrapper">
+        <table class="custom-table" id="students-table">
+            <thead>
+                <tr>
+                    <th class="sortable-th" onclick="setSort('name')">
+                        Student Name &amp; UID
+                        {% if active_filters.sort_by == 'name' %}<span class="sort-arrow">{{ '▼' if active_filters.sort_order == 'desc' else '▲' }}</span>{% endif %}
+                    </th>
+                    <th class="sortable-th" onclick="setSort('success_score')">
+                        Success Score
+                        {% if active_filters.sort_by == 'success_score' %}<span class="sort-arrow">{{ '▼' if active_filters.sort_order == 'desc' else '▲' }}</span>{% endif %}
+                    </th>
+                    <th class="sortable-th" onclick="setSort('risk_level')">
+                        Risk Flag
+                        {% if active_filters.sort_by == 'risk_level' %}<span class="sort-arrow">{{ '▼' if active_filters.sort_order == 'desc' else '▲' }}</span>{% endif %}
+                    </th>
+                    <th>Cohort Segment</th>
+                    <th class="sortable-th" onclick="setSort('cgpa')">
+                        CGPA
+                        {% if active_filters.sort_by == 'cgpa' %}<span class="sort-arrow">{{ '▼' if active_filters.sort_order == 'desc' else '▲' }}</span>{% endif %}
+                    </th>
+                    <th class="sortable-th" onclick="setSort('attendance_overall')">
+                        Attendance
+                        {% if active_filters.sort_by == 'attendance_overall' %}<span class="sort-arrow">{{ '▼' if active_filters.sort_order == 'desc' else '▲' }}</span>{% endif %}
+                    </th>
+                    <th>Backlogs</th>
+                    <th style="text-align: right;">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in students %}
+                    <tr class="clickable-student-row" onclick="window.location='{{ url_for('student_detail_view', uid=s.uid) }}';" title="Click to view details for {{ s.name }}">
+                        <!-- Student Name, Avatar & UID -->
+                        <td>
+                            <div class="student-avatar-cell">
+                                <div class="student-avatar-badge" aria-hidden="true">
+                                    {{ s.initials }}
+                                </div>
+                                <div class="student-name-meta">
+                                    <span class="student-name-title">{{ s.name }}</span>
+                                    <span class="student-uid-sub" style="font-family: monospace;">{{ s.uid }}</span>
+                                </div>
+                            </div>
+                        </td>
+
+                        <!-- Success Score -->
+                        <td>
+                            <span style="font-size: 1.05rem; font-weight: 800; color: {{ 'var(--danger-text)' if s.success_score < 50.0 else ('var(--warning-text)' if s.success_score < 65.0 else 'var(--success-text)') }};">
+                                {{ s.success_score }}
+                            </span>
+                        </td>
+
+                        <!-- Colored Risk Flag (Green / Amber / Red) -->
+                        <td>
+                            {% if s.risk_level == 'High' or s.needs_attention == 1 %}
+                                <span class="risk-flag-badge red">
+                                    🔴 High Risk
+                                </span>
+                            {% elif s.risk_level == 'Medium' %}
+                                <span class="risk-flag-badge amber">
+                                    🟡 Medium Risk
+                                </span>
+                            {% else %}
+                                <span class="risk-flag-badge green">
+                                    🟢 Low Risk
+                                </span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Cohort Segment -->
+                        <td>
+                            <span class="meta-pill segment" style="font-size: 0.75rem;">
+                                {{ s.segment }}
+                            </span>
+                        </td>
+
+                        <!-- CGPA -->
+                        <td>
+                            <span style="font-weight: 600; color: {{ 'var(--danger-text)' if s.cgpa < 6.0 else 'var(--text-main)' }};">
+                                {{ s.cgpa }}
+                            </span>
+                        </td>
+
+                        <!-- Attendance % -->
+                        <td>
+                            <span style="font-weight: 600; color: {{ 'var(--danger-text)' if s.attendance_overall < 65.0 else ('var(--warning-text)' if s.attendance_overall < 75.0 else 'var(--success-text)') }};">
+                                {{ s.attendance_overall }}%
+                            </span>
+                        </td>
+
+                        <!-- Backlogs -->
+                        <td>
+                            {% if s.backlogs > 0 %}
+                                <span style="font-weight: 700; color: var(--danger-text); background-color: var(--danger-bg); padding: 0.2rem 0.5rem; border-radius: var(--radius-full); font-size: 0.75rem;">
+                                    {{ s.backlogs }} Active
+                                </span>
+                            {% else %}
+                                <span style="color: var(--text-muted); font-size: 0.85rem;">0</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Action Button -->
+                        <td style="text-align: right;" onclick="event.stopPropagation();">
+                            <a href="{{ url_for('student_detail_view', uid=s.uid) }}" class="btn-table-action">
+                                View Profile →
+                            </a>
+                        </td>
+                    </tr>
+                {% else %}
+                    <tr>
+                        <td colspan="8" style="text-align: center; padding: 3.5rem 2rem; color: var(--text-muted);">
+                            <div style="font-size: 2rem; margin-bottom: 0.5rem;">🔍</div>
+                            <h3>No students matched the selected filters</h3>
+                            <p style="margin-top: 0.25rem;">Try adjusting your search query or reset the filter dropdowns.</p>
+                            <a href="{{ url_for('students_view') }}" class="btn-table-action" style="display: inline-block; margin-top: 1rem;">
+                                Reset All Filters
+                            </a>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts_extra %}
+<script>
+    let searchDebounceTimer = null;
+    function debounceSearch() {
+        clearTimeout(searchDebounceTimer);
+        searchDebounceTimer = setTimeout(() => {
+            document.getElementById('filters-form').submit();
+        }, 500);
+    }
+
+    function toggleSortOrder() {
+        const orderInput = document.getElementById('sort_order_input');
+        orderInput.value = (orderInput.value === 'desc') ? 'asc' : 'desc';
+        document.getElementById('filters-form').submit();
+    }
+
+    function setSort(colName) {
+        const form = document.getElementById('filters-form');
+        const sortSelect = form.querySelector('select[name="sort_by"]');
+        const orderInput = document.getElementById('sort_order_input');
+        
+        if (sortSelect.value === colName) {
+            orderInput.value = (orderInput.value === 'desc') ? 'asc' : 'desc';
+        } else {
+            sortSelect.value = colName;
+            orderInput.value = 'desc';
+        }
+        form.submit();
+    }
+</script>
+{% endblock %}

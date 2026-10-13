@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign In | InnoVista University Analytics</title>
+    <!-- Master Shared Stylesheet -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="login-split-page">
+        <!-- Left Hero Section (~45% width): Brand identity, stylized cap, glowing rings -->
+        <section class="login-brand-hero" aria-label="University Brand Showcase">
+            <div class="brand-emblem-container">
+                <div class="brand-cap-emblem" aria-hidden="true">🎓</div>
+            </div>
+            <h2 class="brand-hero-title">InnoVista University</h2>
+            <div class="brand-hero-subtitle">Engineering College</div>
+        </section>
+
+        <!-- Right Form Section (~55% width): Authentication card -->
+        <main class="login-form-container">
+            <div class="login-form-card">
+                <h1>Welcome Back!</h1>
+                <p class="login-subtitle">Sign in to access your student performance and analytics dashboard.</p>
+
+                <!-- Flash feedback for authentication errors -->
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="alert-box error" role="alert">
+                                <span>⚠️</span>
+                                <span>{{ message }}</span>
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+
+                <!-- Form submitting to /login -->
+                <form method="POST" action="{{ url_for('login') }}" autocomplete="on">
+                    <!-- Email / Username Input -->
+                    <div class="login-form-group">
+                        <label for="username" class="login-label">Email Address or Username</label>
+                        <div class="login-input-wrapper">
+                            <span class="login-input-icon" aria-hidden="true">✉️</span>
+                            <input 
+                                type="text" 
+                                id="username" 
+                                name="username" 
+                                class="login-field" 
+                                placeholder="Enter your email or username" 
+                                required 
+                                autofocus
+                            >
+                        </div>
+                    </div>
+
+                    <!-- Password Input -->
+                    <div class="login-form-group">
+                        <label for="password" class="login-label">Password</label>
+                        <div class="login-input-wrapper">
+                            <span class="login-input-icon" aria-hidden="true">🔒</span>
+                            <input 
+                                type="password" 
+                                id="password" 
+                                name="password" 
+                                class="login-field" 
+                                placeholder="Enter your password" 
+                                required
+                            >
+                            <span 
+                                class="login-pwd-toggle" 
+                                onclick="togglePassword()" 
+                                title="Toggle password visibility"
+                                role="button"
+                                tabindex="0"
+                                aria-label="Toggle password visibility"
+                            >
+                                <span id="toggle-icon">👁️</span>
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Remember Me & Forgot Password -->
+                    <div class="login-options-row">
+                        <label class="remember-checkbox-label">
+                            <input type="checkbox" name="remember_me" id="remember_me">
+                            <span>Remember me</span>
+                        </label>
+                        <a href="javascript:void(0)" onclick="alert('Demo staff accounts:\nAdmin: admin / admin123\nFaculty: faculty1 / faculty123');" class="forgot-link">
+                            Forgot password?
+                        </a>
+                    </div>
+
+                    <!-- Sign In Action Button -->
+                    <button type="submit" class="btn-login-submit">
+                        <span>Sign In</span>
+                        <span aria-hidden="true">➔</span>
+                    </button>
+                </form>
+
+                <!-- Divider -->
+                <div class="login-divider">
+                    <span>OR</span>
+                </div>
+
+                <!-- Footer help note -->
+                <p class="login-footer-text">
+                    Don't have an account? <a href="javascript:void(0)" onclick="alert('Please contact InnoVista University Campus IT Administration.');">Contact your institution</a>
+                </p>
+
+                <!-- Demo synthetic disclaimer (Phase 9) -->
+                <div class="login-synthetic-footer">
+                    <span>Demo uses synthetic data generated for this prototype.</span>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Master Shared JavaScript -->
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

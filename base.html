@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Smart Campus Analytics{% endblock %} | InnoVista University</title>
+    <!-- Master Shared Stylesheet -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% block head_extra %}{% endblock %}
+</head>
+<body>
+    <!-- Top Navigation Header (Reused across all staff dashboard pages) -->
+    <header class="app-header">
+        <div class="header-left">
+            <a href="{{ url_for('overview') if session.get('batch_code') else url_for('select_batch') }}" class="brand-link" title="InnoVista Smart Campus">
+                <div class="brand-emblem" aria-hidden="true">🎓</div>
+                <div class="brand-text-block">
+                    <span class="brand-title-main">InnoVista University</span>
+                    <span class="brand-title-sub">Engineering College • Analytics</span>
+                </div>
+            </a>
+
+            <div class="header-divider"></div>
+
+            <!-- Active Batch Switcher Pill in Header -->
+            <div class="header-batch-pill" title="Currently active batch">
+                <span class="batch-icon">📖</span>
+                <span>Cohort: <strong>{{ session.get('batch_code', 'Not Selected') }}</strong></span>
+                <a href="{{ url_for('select_batch') }}" class="batch-switch-btn" title="Choose another cohort">Change</a>
+            </div>
+        </div>
+
+        <div class="header-right">
+            <!-- User Profile & Role Tag -->
+            <div class="header-user-profile">
+                {% set name_parts = session.get('full_name', 'Staff Member').split() %}
+                {% set initials = (name_parts[0][0] + (name_parts[-1][0] if name_parts|length > 1 else ''))|upper %}
+                <div class="user-avatar-circle" title="{{ session.get('username') }}">
+                    {{ initials }}
+                </div>
+                <div class="user-meta-text">
+                    <span class="user-name-label">{{ session.get('full_name', 'Staff Member') }}</span>
+                    <span class="role-tag {{ session.get('role', 'Faculty')|lower }}">
+                        {{ session.get('role', 'Faculty') }}
+                    </span>
+                </div>
+            </div>
+
+            <!-- Logout Button -->
+            <a href="{{ url_for('logout') }}" class="btn-header-logout" title="Sign out of platform">
+                <span>Sign Out</span>
+                <span aria-hidden="true">➔</span>
+            </a>
+        </div>
+    </header>
+
+    <!-- Main Application Container -->
+    <main class="app-container">
+        <!-- Flash Notification Banners -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="flash-alerts-container">
+                    {% for category, message in messages %}
+                        <div class="alert-box {{ 'error' if category == 'error' else ('success' if category == 'success' else 'info') }}" role="alert">
+                            <span>{{ '⚠️' if category == 'error' else ('✅' if category == 'success' else 'ℹ️') }}</span>
+                            <span>{{ message }}</span>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        <!-- Child Page Content Block -->
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Global Application Footer (Phase 9) -->
+    <footer class="app-footer">
+        <div class="footer-content">
+            <div>
+                <strong>InnoVista University</strong> &bull; Student Success &amp; Analytics Platform
+            </div>
+            <div class="footer-synthetic-tag">
+                <span>ℹ️</span>
+                <span>Demo uses synthetic data generated for this prototype.</span>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Master Shared JavaScript -->
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    {% block scripts_extra %}{% endblock %}
+</body>
+</html>
